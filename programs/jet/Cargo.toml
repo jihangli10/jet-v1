@@ -15,6 +15,7 @@ no-idl = []
 devnet = ["anchor-spl/devnet"]
 cpi = ["no-entrypoint"]
 default = []
+no-fresh-checks = []
 
 [dependencies]
 anchor-lang = "0.18.2"
