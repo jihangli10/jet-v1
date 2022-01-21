@@ -50,7 +50,7 @@ pub enum ErrorCode {
     ObligationUnhealthy,
 
     #[msg("reserve requires special action; call refresh_reserve until up to date")]
-    ExceptionalReserveState,
+    ExceptionalReserveState, //10
 
     #[msg("the units provided in the amount are not valid for the instruction")]
     InvalidAmountUnits,
@@ -80,13 +80,13 @@ pub enum ErrorCode {
     CollateralValueTooSmall,
 
     #[msg("the collateral returned by the liquidation is smaller than requested")]
-    LiquidationLowCollateral,
+    LiquidationLowCollateral, //20
 
     #[msg("this action is currently not supported by this version of the program")]
     NotSupported,
 
     #[msg("the market has currently halted this kind of operation")]
-    MarketHalted,
+    MarketHalted, //22
 
     #[msg("a given parameter is not valid")]
     InvalidParameter,

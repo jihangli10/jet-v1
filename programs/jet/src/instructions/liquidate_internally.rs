@@ -15,21 +15,20 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::cell::Ref;
-use std::cell::RefMut;
-
 use anchor_lang::prelude::*;
 use anchor_lang::Key;
+use anchor_spl::token::Burn;
 use anchor_spl::token::{self, Transfer};
 
 use crate::errors::ErrorCode;
 use crate::instructions::repay::RepayStyle;
+use crate::instructions::transfer_collateral;
 use crate::repay::{implement_repay_context, repay, RepayContext};
 use crate::state::*;
 use crate::{Amount, Rounding};
 
 #[event]
-pub struct LiquidateEvent {
+pub struct LiquidateInternallyEvent {
     borrower: Pubkey,
     debt_reserve: Pubkey,
     collateral_reserve: Pubkey,
@@ -38,7 +37,7 @@ pub struct LiquidateEvent {
 }
 
 #[derive(Accounts)]
-pub struct Liquidate<'info> {
+pub struct LiquidateInternally<'info> {
     /// The relevant market this liquidation is for
     #[account(has_one = market_authority)]
     pub market: Loader<'info, Market>,
@@ -54,19 +53,27 @@ pub struct Liquidate<'info> {
               constraint = obligation.load().unwrap().is_collateral_reserve(&market.load().unwrap(), &collateral_account.key(), &collateral_reserve.key()))]
     pub obligation: Loader<'info, Obligation>,
 
+    /// The obligation with debt to be repaid
+    #[account(mut,
+              has_one = market,
+            //   constraint = liquidator_obligation.load().unwrap().has_collateral_custody(&collateral_account.key()), // may be needed - open position first
+              constraint = liquidator_obligation.load().unwrap().has_collateral_custody(&loan_account.key()),
+              constraint = liquidator_obligation.load().unwrap().is_collateral_reserve(&market.load().unwrap(), &collateral_account.key(), &collateral_reserve.key()))]
+    pub liquidator_obligation: Loader<'info, Obligation>,
+
     /// The reserve that the debt is from
     #[account(mut,
               has_one = market,
-              has_one = vault,
+            //   has_one = vault,
               has_one = loan_note_mint)]
     pub reserve: Loader<'info, Reserve>,
 
     /// The reserve the collateral is from
     pub collateral_reserve: Loader<'info, Reserve>,
 
-    /// The reserve's vault where the payment will be transferred to
-    #[account(mut)]
-    pub vault: AccountInfo<'info>,
+    // /// The reserve's vault where the payment will be transferred to
+    // #[account(mut)]
+    // pub vault: AccountInfo<'info>,
 
     /// The mint for the debt/loan notes
     #[account(mut)]
@@ -80,7 +87,7 @@ pub struct Liquidate<'info> {
     #[account(mut)]
     pub collateral_account: AccountInfo<'info>,
 
-    /// The token account that the payment funds will be transferred from
+    /// The deposit? or collateral? account that the payment funds will be burned from
     #[account(mut)]
     pub payer_account: AccountInfo<'info>,
 
@@ -96,7 +103,7 @@ pub struct Liquidate<'info> {
     pub token_program: AccountInfo<'info>,
 }
 
-impl<'info> Liquidate<'info> {
+impl<'info> LiquidateInternally<'info> {
     fn transfer_collateral_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
         CpiContext::new(
             self.token_program.clone(),
@@ -109,11 +116,12 @@ impl<'info> Liquidate<'info> {
     }
 }
 
-implement_repay_context! {Liquidate<'info>}
+implement_repay_context! {LiquidateInternally<'info>}
 
 /// Liquidate a part of an obligation's debt
 /// amount: number of tokens being paid off from the debt
-pub fn handler(ctx: Context<Liquidate>, amount: Amount, min_collateral: u64) -> ProgramResult {
+pub fn handler(ctx: Context<LiquidateInternally>, amount: Amount, min_collateral: u64) -> ProgramResult {
+    // let collateral_amount = transfer_collateral(ctx.accounts, amount, min_collateral)?;
     let collateral_amount = transfer_collateral(
         ctx.accounts.market.load()?,
         ctx.accounts.reserve.load()?,
@@ -126,17 +134,20 @@ pub fn handler(ctx: Context<Liquidate>, amount: Amount, min_collateral: u64) -> 
         min_collateral
     )?;
 
+    // repay(&ctx, amount)?;
+
     repay(
         &ctx,
-        RepayStyle::Deposit(Transfer {
-            from: ctx.accounts.payer_account.to_account_info(),
-            to: ctx.accounts.vault.to_account_info(),
-            authority: ctx.accounts.payer.clone(),
-        }),
+        RepayStyle::Burn(Burn {
+            to: ctx.accounts.loan_account.to_account_info(),
+            mint: ctx.accounts.loan_note_mint.to_account_info(),
+            authority: ctx.accounts.market_authority.clone(),
+        },),
         amount,
     )?;
 
-    emit!(LiquidateEvent {
+
+    emit!(LiquidateInternallyEvent {
         borrower: ctx.accounts.obligation.key(),
         debt_reserve: ctx.accounts.reserve.key(),
         // FIXME: should be the collateral's reserve
@@ -147,63 +158,56 @@ pub fn handler(ctx: Context<Liquidate>, amount: Amount, min_collateral: u64) -> 
     Ok(())
 }
 
-pub fn transfer_collateral<'info>(
-    // accounts: &mut Liquidate,
-    market: Ref<Market>,
-    reserve: Ref<Reserve>,
-    collateral_reserve: Ref<Reserve>,
-    mut obligation: RefMut<Obligation>,
-    collateral_account: Pubkey,
-    loan_account: Pubkey,
-    transfer_collateral_context: CpiContext<'_, '_, '_, 'info, Transfer<'info>>,
-    amount: Amount,
-    min_collateral: u64,
-) -> Result<u64, ProgramError> {
-    // let market = accounts.market.load()?;
-    // let reserve = accounts.reserve.load()?;
-    // let collateral_reserve = accounts.collateral_reserve.load()?;
-    // let mut obligation = accounts.obligation.load_mut()?;
-    let clock = Clock::get().unwrap();
+// fn transfer_collateral(
+//     accounts: &mut LiquidateInternally,
+//     amount: Amount,
+//     min_collateral: u64,
+// ) -> Result<u64, ProgramError> {
+//     let market = accounts.market.load()?;
+//     let reserve = accounts.reserve.load()?;
+//     let collateral_reserve = accounts.collateral_reserve.load()?;
+//     let mut obligation = accounts.obligation.load_mut()?;
+//     let clock = Clock::get().unwrap();
 
-    let market_reserves = market.reserves();
-    let reserve_info = market_reserves.get_cached(reserve.index, clock.slot);
+//     let market_reserves = market.reserves();
+//     let reserve_info = market_reserves.get_cached(reserve.index, clock.slot);
 
-    obligation.cache_calculations(market.reserves(), clock.slot);
+//     obligation.cache_calculations(market.reserves(), clock.slot);
 
-    // First check that the obligation is unhealthy
-    if obligation.is_healthy(market_reserves, clock.slot) {
-        return Err(ErrorCode::ObligationHealthy.into());
-    }
+//     // First check that the obligation is unhealthy
+//     if obligation.is_healthy(&market_reserves, clock.slot) {
+//         return Err(ErrorCode::ObligationHealthy.into());
+//     }
 
-    // Calclulate number of tokens being repaid to figure out the value
-    let repaid_notes_amount = reserve.amount(amount.as_loan_notes(reserve_info, Rounding::Down)?);
+//     // Calclulate number of tokens being repaid to figure out the value
+//     let repaid_notes_amount = reserve.amount(amount.as_loan_notes(reserve_info, Rounding::Down)?);
 
-    // Calculate the appropriate amount of the collateral that the
-    // liquidator should receive in return for this repayment
-    // let collateral_account = accounts.collateral_account.key();
-    // let loan_account = accounts.loan_account.key();
-    let collateral_amount = obligation.liquidate(
-        market_reserves,
-        clock.slot,
-        &collateral_account,
-        &loan_account,
-        repaid_notes_amount,
-    )?;
+//     // Calculate the appropriate amount of the collateral that the
+//     // liquidator should receive in return for this repayment
+//     let collateral_account = accounts.collateral_account.key();
+//     let loan_account = accounts.loan_account.key();
+//     let collateral_amount = obligation.liquidate(
+//         &market_reserves,
+//         clock.slot,
+//         &collateral_account,
+//         &loan_account,
+//         repaid_notes_amount,
+//     )?;
 
-    let collateral_amount = collateral_amount.as_u64_rounded(collateral_reserve.exponent);
+//     let collateral_amount = collateral_amount.as_u64_rounded(collateral_reserve.exponent);
 
-    if collateral_amount < min_collateral {
-        msg!("collateral below amount requested");
-        return Err(ErrorCode::LiquidationLowCollateral.into());
-    }
+//     if collateral_amount < min_collateral {
+//         msg!("collateral below amount requested");
+//         return Err(ErrorCode::LiquidationLowCollateral.into());
+//     }
 
-    // Transfer the collateral to the liquidator's account
-    token::transfer(
-        // accounts
-            transfer_collateral_context
-            .with_signer(&[&market.authority_seeds()]),
-        collateral_amount,
-    )?;
+//     // Transfer the collateral to the liquidator's account
+//     token::transfer(
+//         accounts
+//             .transfer_collateral_context()
+//             .with_signer(&[&market.authority_seeds()]),
+//         collateral_amount,
+//     )?;
 
-    Ok(collateral_amount)
-}
+//     Ok(collateral_amount)
+// }

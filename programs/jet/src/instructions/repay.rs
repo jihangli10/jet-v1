@@ -80,25 +80,21 @@ pub trait RepayContext<'info> {
     fn market_authority(&self) -> &AccountInfo<'info>;
     fn obligation(&self) -> &Loader<'info, Obligation>;
     fn reserve(&self) -> &Loader<'info, Reserve>;
-    fn vault(&self) -> &AccountInfo<'info>;
+    // fn vault(&self) -> &AccountInfo<'info>;
     fn loan_note_mint(&self) -> &AccountInfo<'info>;
     fn payer(&self) -> &AccountInfo<'info>;
     fn loan_account(&self) -> &AccountInfo<'info>;
-    fn payer_account(&self) -> &AccountInfo<'info>;
+    // fn payer_account(&self) -> &AccountInfo<'info>;
     fn token_program(&self) -> &AccountInfo<'info>;
 
-    fn transfer_context(&self) -> CpiContext<'_, '_, '_, 'info, Transfer<'info>> {
-        CpiContext::new(
-            self.token_program().clone(),
-            Transfer {
-                from: self.payer_account().to_account_info(),
-                to: self.vault().to_account_info(),
-                authority: self.payer().clone(),
-            },
-        )
+    fn cpi_token<T: ToAccountMetas + ToAccountInfos<'info>>(
+        &self,
+        accounts: T,
+    ) -> CpiContext<'_, '_, '_, 'info, T> {
+        CpiContext::new(self.token_program().clone(), accounts)
     }
 
-    fn note_burn_context(&self) -> CpiContext<'_, '_, '_, 'info, Burn<'info>> {
+    fn debt_burn_context(&self) -> CpiContext<'_, '_, '_, 'info, Burn<'info>> {
         CpiContext::new(
             self.token_program().clone(),
             Burn {
@@ -125,9 +121,9 @@ macro_rules! implement_repay_context {
             fn reserve(&self) -> &Loader<'info, Reserve> {
                 &self.reserve
             }
-            fn vault(&self) -> &AccountInfo<'info> {
-                &self.vault
-            }
+            // fn vault(&self) -> &AccountInfo<'info> {
+            //     &self.vault
+            // }
             fn loan_note_mint(&self) -> &AccountInfo<'info> {
                 &self.loan_note_mint
             }
@@ -137,9 +133,9 @@ macro_rules! implement_repay_context {
             fn loan_account(&self) -> &AccountInfo<'info> {
                 &self.loan_account
             }
-            fn payer_account(&self) -> &AccountInfo<'info> {
-                &self.payer_account
-            }
+            // fn payer_account(&self) -> &AccountInfo<'info> {
+            //     &self.payer_account
+            // }
             fn token_program(&self) -> &AccountInfo<'info> {
                 &self.token_program
             }
@@ -148,16 +144,27 @@ macro_rules! implement_repay_context {
 }
 pub(crate) use implement_repay_context;
 
+
 implement_repay_context! {Repay<'info>}
 
 /// Repay tokens for a loan
 pub fn handler(ctx: Context<Repay>, amount: Amount) -> ProgramResult {
-    repay(&ctx, amount)?;
+    // repay(&ctx, amount)?;
+    repay(
+        &ctx,
+        RepayStyle::Deposit(Transfer {
+            from: ctx.accounts.payer_account.to_account_info(),
+            to: ctx.accounts.vault.to_account_info(),
+            authority: ctx.accounts.payer.clone(),
+        }),
+        amount,
+    )?;
     Ok(())
 }
 
 pub fn repay<'info, T: RepayContext<'info>>(
     ctx: &Context<T>,
+    repay_style: RepayStyle<'info>,
     amount: Amount,
 ) -> Result<(), ProgramError> {
     let clock = Clock::get().unwrap();
@@ -180,13 +187,22 @@ pub fn repay<'info, T: RepayContext<'info>>(
     // Burn the debt that's being repaid
     token::burn(
         ctx.accounts
-            .note_burn_context()
+            .debt_burn_context()
             .with_signer(&[&market.authority_seeds()]),
         payoff_notes,
     )?;
 
     // Transfer the payment tokens to the reserve's vault
-    token::transfer(ctx.accounts.transfer_context(), payoff_tokens)?;
+    // token::transfer(ctx.accounts.transfer_context(), payoff_tokens)?;
+    match repay_style {
+        RepayStyle::Deposit(transfer) => {
+            token::transfer(ctx.accounts.cpi_token(transfer), payoff_tokens)?
+        }
+        RepayStyle::Burn(burn) => token::burn(
+            ctx.accounts.cpi_token(burn),
+            amount.as_deposit_notes(reserve_info, Rounding::Up)?,
+        )?,
+    }
 
     // Keep the reserve's borrow tracking updated
     reserve.repay(clock.slot, payoff_tokens, payoff_notes);
@@ -201,4 +217,9 @@ pub fn repay<'info, T: RepayContext<'info>>(
     });
 
     Ok(())
+}
+
+pub enum RepayStyle<'info> {
+    Deposit(Transfer<'info>),
+    Burn(Burn<'info>),
 }

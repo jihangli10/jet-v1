@@ -249,7 +249,7 @@ impl Amount {
         match self.units {
             AmountUnits::Tokens => Ok(reserve_info.deposit_notes_from_tokens(self.value, rounding)),
             AmountUnits::DepositNotes => Ok(self.value),
-            AmountUnits::LoanNotes => Err(ErrorCode::InvalidAmountUnits),
+            AmountUnits::LoanNotes => Ok(reserve_info.loan_notes_to_deposit_notes(self.value, rounding)),
         }
     }
 
@@ -262,7 +262,7 @@ impl Amount {
         match self.units {
             AmountUnits::Tokens => Ok(reserve_info.loan_notes_from_tokens(self.value, rounding)),
             AmountUnits::LoanNotes => Ok(self.value),
-            AmountUnits::DepositNotes => Err(ErrorCode::InvalidAmountUnits),
+            AmountUnits::DepositNotes => Ok(reserve_info.deposit_notes_to_loan_notes(self.value, rounding)),
         }
     }
 

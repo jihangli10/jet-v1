@@ -323,6 +323,24 @@ impl CachedReserveInfo {
             Rounding::Down => deposit_notes.as_u64(0),
         }
     }
+
+    pub fn loan_notes_to_deposit_notes(&self, loan_notes: u64, rounding: Rounding) -> u64 {
+        let deposit_notes = (self.loan_note_exchange_rate * Number::from(loan_notes))
+            / self.deposit_note_exchange_rate;
+        match rounding {
+            Rounding::Up => deposit_notes.as_u64_ceil(0),
+            Rounding::Down => deposit_notes.as_u64(0),
+        }
+    }
+
+    pub fn deposit_notes_to_loan_notes(&self, loan_notes: u64, rounding: Rounding) -> u64 {
+        let loan_notes = (self.deposit_note_exchange_rate * Number::from(loan_notes))
+            / self.loan_note_exchange_rate;
+        match rounding {
+            Rounding::Up => loan_notes.as_u64_ceil(0),
+            Rounding::Down => loan_notes.as_u64(0),
+        }
+    }
 }
 
 impl Deref for ReserveInfo {
