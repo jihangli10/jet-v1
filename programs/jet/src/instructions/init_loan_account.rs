@@ -20,6 +20,15 @@ use anchor_lang::Key;
 
 use crate::state::*;
 
+#[event]
+pub struct InitLoanAccount {
+    market: Pubkey,
+    reserve: Pubkey,
+    obligation: Pubkey,
+    loan_account: Pubkey,
+    owner: Pubkey,
+}
+
 #[derive(Accounts)]
 #[instruction(bump: u8)]
 pub struct InitializeLoanAccount<'info> {
@@ -82,5 +91,14 @@ pub fn handler(ctx: Context<InitializeLoanAccount>, _bump: u8) -> ProgramResult 
     obligation.register_loan(&account, reserve.index)?;
 
     msg!("initialized loan account");
+
+    emit!(InitLoanAccount {
+        market: ctx.accounts.market.key(),
+        reserve: ctx.accounts.reserve.key(),
+        obligation: ctx.accounts.obligation.key(),
+        loan_account: ctx.accounts.loan_account.key(),
+        owner: ctx.accounts.owner.key(),
+    });
+
     Ok(())
 }
