@@ -26,6 +26,14 @@ use pyth_client::Product;
 use crate::state::*;
 use crate::utils;
 
+#[event]
+pub struct InitReserve {
+    market: Pubkey,
+    reserve: Pubkey,
+    token_mint: Pubkey,
+    config: ReserveConfig,
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct InitReserveBumpSeeds {
     pub vault: u8,
@@ -300,6 +308,13 @@ pub fn handler(
 
     // Create extra accounts needed by the reserve, e.g. the mint for the depository notes
     ctx.accounts.init_accounts()?;
+
+    emit!(InitReserve {
+        market: ctx.accounts.market.key(),
+        reserve: ctx.accounts.reserve.key(),
+        config,
+        token_mint: ctx.accounts.token_mint.key(),
+    });
 
     Ok(())
 }
