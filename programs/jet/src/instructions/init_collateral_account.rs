@@ -3,6 +3,15 @@ use anchor_lang::Key;
 
 use crate::state::*;
 
+#[event]
+pub struct InitCollateralAccount {
+    market: Pubkey,
+    reserve: Pubkey,
+    obligation: Pubkey,
+    collateral_account: Pubkey,
+    owner: Pubkey,
+}
+
 #[derive(Accounts)]
 #[instruction(bump: u8)]
 pub struct InitializeCollateralAccount<'info> {
@@ -65,5 +74,14 @@ pub fn handler(ctx: Context<InitializeCollateralAccount>, _bump: u8) -> ProgramR
     obligation.register_collateral(&account, reserve.index)?;
 
     msg!("initialized collateral account");
+
+    emit!(InitCollateralAccount {
+        market: ctx.accounts.market.key(),
+        reserve: ctx.accounts.reserve.key(),
+        obligation: ctx.accounts.obligation.key(),
+        collateral_account: ctx.accounts.collateral_account.key(),
+        owner: ctx.accounts.owner.key(),
+    });
+
     Ok(())
 }
