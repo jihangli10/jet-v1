@@ -22,6 +22,14 @@ use anchor_lang::Key;
 
 use crate::state::*;
 
+#[event]
+pub struct InitMarket {
+    market: Pubkey,
+    owner: Pubkey,
+    quote_token_mint: Pubkey,
+    quote_currency: [u8; 15],
+}
+
 #[derive(Accounts)]
 pub struct InitializeMarket<'info> {
     #[account(zero)]
@@ -51,6 +59,13 @@ pub fn handler(
     (&mut market.quote_currency[..]).write_all(quote_currency.as_bytes())?;
 
     msg!("market initialized with currency {}", quote_currency);
+    
+    emit!(InitMarket {
+        market: market_address,
+        owner,
+        quote_token_mint,
+        quote_currency: market.quote_currency,
+    });
 
     Ok(())
 }
