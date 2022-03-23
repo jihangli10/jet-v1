@@ -20,6 +20,13 @@ use anchor_lang::Key;
 
 use crate::state::*;
 
+#[event]
+pub struct InitObligation {
+    market: Pubkey,
+    obligation: Pubkey,
+    owner: Pubkey,
+}
+
 #[derive(Accounts)]
 #[instruction(bump: u8)]
 pub struct InitializeObligation<'info> {
@@ -59,5 +66,12 @@ pub fn handler(ctx: Context<InitializeObligation>, _bump: u8) -> ProgramResult {
     obligation.owner = *ctx.accounts.borrower.key;
 
     msg!("initialized obligation account");
+
+    emit!(InitObligation {
+        market: ctx.accounts.market.key(),
+        obligation: ctx.accounts.obligation.key(),
+        owner: ctx.accounts.borrower.key(),
+    });
+
     Ok(())
 }
