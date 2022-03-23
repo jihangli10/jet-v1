@@ -20,6 +20,13 @@ use anchor_lang::Key;
 
 use crate::state::*;
 
+#[event]
+pub struct InitDepositAccount {
+    market: Pubkey,
+    reserve: Pubkey,
+    depositor: Pubkey,
+}
+
 #[derive(Accounts)]
 #[instruction(bump: u8)]
 pub struct InitializeDepositAccount<'info> {
@@ -62,10 +69,17 @@ pub struct InitializeDepositAccount<'info> {
 }
 
 /// Initialize an account that can be used to store deposit notes
-pub fn handler(_ctx: Context<InitializeDepositAccount>, _bump: u8) -> ProgramResult {
+pub fn handler(ctx: Context<InitializeDepositAccount>, _bump: u8) -> ProgramResult {
     // Do nothing, the deposit account should be initialized
     // automatically by anchor during setup for this handler.
 
     msg!("initialized deposit account");
+
+    emit!(InitDepositAccount {
+        market: ctx.accounts.market.key(),
+        reserve: ctx.accounts.reserve.key(),
+        depositor: ctx.accounts.depositor.key(),
+    });
+
     Ok(())
 }
